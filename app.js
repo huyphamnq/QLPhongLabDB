@@ -4,16 +4,15 @@ require("dotenv").config();
 const cors = require("cors");
 const swaggerUi = require("swagger-ui-express");
 const swaggerJsdoc = require("swagger-jsdoc");
-const os = require("os");
 
 const authRouter = require("./routes/auth");
 
 const app = express();
 
 const allowedOrigins = [
-  "https://qlphonglabdb.onrender.com/api-docs",
-  "http://localhost:5500", // nếu bạn test local be
-  "http://localhost:3000" // nếu bạn test local fe
+  "https://qlphonglabdb.onrender.com",
+  "http://localhost:5500", // test local BE
+  "http://localhost:3000", // test local FE
 ];
 
 app.use(
@@ -22,6 +21,7 @@ app.use(
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
+        console.log("Blocked by CORS:", origin);
         callback(new Error("Not allowed by CORS"));
       }
     },
@@ -41,7 +41,7 @@ const options = {
       description: "",
     },
     servers: [
-      {url: "https://qlphonglabdb.onrender.com" },
+      { url: "https://qlphonglabdb.onrender.com" }, // domain public backend
     ],
     components: {
       securitySchemes: {
@@ -61,18 +61,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(specs));
 
 app.use("/auth", authRouter);
 
-const ifaces = os.networkInterfaces();
-let localIP = "localhost";
-for (const iface of Object.values(ifaces)) {
-  for (const i of iface) {
-    if (i.family === "IPv4" && !i.internal) {
-      localIP = i.address;
-      break;
-    }
-  }
-}
-
 app.listen(3000, "0.0.0.0", () => {
-  console.log(`Server chạy tại http://${localIP}:3000`);
-  console.log(`Swagger UI: http://${localIP}:3000/api-docs`);
+  console.log(`Swagger UI Local Test: localhost:3000/api-docs`);
+  console.log(`Swagger UI Public: https://qlphonglabdb.onrender.com/api-docs`);
 });
