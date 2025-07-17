@@ -11,7 +11,7 @@ const app = express();
 
 const allowedOrigins = [
   "https://qlphonglabdb.onrender.com",
-  "http://localhost:5500", // test local BE
+  "http://127.0.0.1:5500", // test local BE
   "http://localhost:3000", // test local FE
 ];
 
@@ -62,6 +62,6 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(specs));
 app.use("/auth", authRouter);
 
 app.listen(3000, "0.0.0.0", () => {
-  console.log(`Swagger UI Local Test: localhost:3000/api-docs`);
+  console.log(`Swagger UI Local Test: https://localhost:3000/api-docs`);
   console.log(`Swagger UI Public: https://qlphonglabdb.onrender.com/api-docs`);
 });
