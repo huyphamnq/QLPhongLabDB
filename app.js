@@ -10,10 +10,22 @@ const authRouter = require("./routes/auth");
 
 const app = express();
 
+const allowedOrigins = [
+  "https://qlphonglabdb.onrender.com/api-docs",
+  "http://localhost:5500", // nếu bạn test local be
+  "http://localhost:3000" // nếu bạn test local fe
+];
+
 app.use(
   cors({
-    origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
@@ -29,8 +41,7 @@ const options = {
       description: "",
     },
     servers: [
-      // Chỉ để IP LAN thôi nếu test trên mạng khác
-      { url: "http://192.168.100.224:3000" },
+      {url: "https://qlphonglabdb.onrender.com" },
     ],
     components: {
       securitySchemes: {
