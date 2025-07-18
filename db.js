@@ -20,4 +20,4 @@ pool
     process.exit(1);
   });
 
-module.exports = { pool }; // ✅ Bọc trong object để dùng destructuring
+module.exports = pool;
