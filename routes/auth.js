@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const { sql, poolPromise } = require("../db");
+const pool = require("../db");
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -11,81 +11,151 @@ if (!JWT_SECRET) {
   process.exit(1);
 }
 
-const { authenticateToken, requireAdmin } = require("../middlewares/authMiddleware");
+const {
+  authenticateToken,
+  requireAdmin,
+} = require("../middlewares/authMiddleware");
 
 /**
  * @swagger
- * /auth/users:
- *   get:
- *     summary: Lấy danh sách người dùng hoặc tìm theo tên hoặc username (quyền admin)
- *     tags:
- *       - Auth
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - name: search
- *         in: query
- *         schema:
- *           type: string
- *         description: Tìm theo username hoặc full_name
- *     responses:
- *       200:
- *         description: Danh sách người dùng
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   id:
- *                     type: integer
- *                   username:
- *                     type: string
- *                   email:
- *                     type: string
- *                   full_name:
- *                     type: string
- *                   phone_number:
- *                     type: string
- *                   role:
- *                     type: string
- *                   is_active:
- *                     type: boolean
- *       403:
- *         description: Không có quyền
+ * tags:
+ *   name: Auth
+ *   description: Các API xác thực và người dùng
  */
 
-router.get("/users", authenticateToken, requireAdmin, async (req, res) => {
-  const search = req.query.search || '';
+// ====== Helper functions ======
 
+function validateEmail(email) {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return re.test(email);
+}
+
+function validatePassword(password) {
+  const re = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).{8,}$/;
+  return re.test(password);
+}
+
+function validateRegisterInput({ username, email, password, full_name }) {
+  const errors = {};
+
+  if (!username || username.trim() === "") {
+    errors.username = "Username là bắt buộc";
+  }
+  if (!email || email.trim() === "") {
+    errors.email = "Email là bắt buộc";
+  } else if (!validateEmail(email)) {
+    errors.email = "Email không hợp lệ";
+  }
+  if (!password || password.trim() === "") {
+    errors.password = "Password là bắt buộc";
+  } else if (!validatePassword(password)) {
+    errors.password =
+      "Mật khẩu yếu. Phải có ít nhất 8 ký tự, bao gồm chữ hoa, chữ thường, số và ký tự đặc biệt";
+  }
+  if (!full_name || full_name.trim() === "") {
+    errors.full_name = "Họ và tên là bắt buộc";
+  }
+
+  return {
+    valid: Object.keys(errors).length === 0,
+    errors,
+  };
+}
+
+// ====== ROUTES ======
+
+/**
+ * @swagger
+ * /auth/register:
+ *   post:
+ *     summary: Đăng ký người dùng mới
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - username
+ *               - email
+ *               - password
+ *               - full_name
+ *             properties:
+ *               username:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               full_name:
+ *                 type: string
+ *               phone_number:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Đăng ký thành công
+ *       400:
+ *         description: Dữ liệu không hợp lệ hoặc đã tồn tại
+ *       500:
+ *         description: Lỗi server
+ */
+router.post("/register", async (req, res) => {
+  const { username, email, password, full_name, phone_number } = req.body;
+
+  const { valid, errors } = validateRegisterInput({
+    username,
+    email,
+    password,
+    full_name,
+  });
+
+  if (!valid) {
+    return res.status(400).json({ errors });
+  }
+
+  let conn;
   try {
-    const pool = await poolPromise;
+    conn = await pool.getConnection();
 
-    const result = await pool
-      .request()
-      .input("search", sql.VarChar, `%${search}%`)
-      .query(`
-        SELECT id, username, email, full_name, phone_number, role, is_active
-        FROM users
-        WHERE username LIKE @search OR full_name LIKE @search
-      `);
+    const [existingUsers] = await conn.execute(
+      "SELECT username, email FROM users WHERE username = ? OR email = ?",
+      [username, email]
+    );
 
-    res.json(result.recordset);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Lỗi server khi lấy danh sách người dùng" });
+    if (existingUsers.length > 0) {
+      const errorResponse = {};
+      existingUsers.forEach((user) => {
+        if (user.username === username)
+          errorResponse.username = "Username đã tồn tại";
+        if (user.email === email) errorResponse.email = "Email đã tồn tại";
+      });
+      return res.status(400).json({ errors: errorResponse });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    await conn.execute(
+      `INSERT INTO users (username, email, password_hash, full_name, phone_number)
+       VALUES (?, ?, ?, ?, ?)`,
+      [username, email, hashedPassword, full_name, phone_number || null]
+    );
+
+    return res.status(201).json({ message: "Đăng ký thành công" });
+  } catch (error) {
+    console.error("Error in /register:", error.stack || error);
+    return res.status(500).json({ error: "Lỗi server" });
+  } finally {
+    if (conn) conn.release();
   }
 });
-
 
 /**
  * @swagger
  * /auth/login:
  *   post:
- *     summary: Đăng nhập người dùng (bằng email hoặc username)
- *     tags:
- *       - Auth
+ *     summary: Đăng nhập (bằng username hoặc email)
+ *     tags: [Auth]
  *     requestBody:
  *       required: true
  *       content:
@@ -98,78 +168,47 @@ router.get("/users", authenticateToken, requireAdmin, async (req, res) => {
  *             properties:
  *               identifier:
  *                 type: string
- *                 description: Email hoặc username
- *                 example: user@example.com
+ *                 description: Username hoặc email
  *               password:
  *                 type: string
- *                 example: password123
  *     responses:
  *       200:
- *         description: Đăng nhập thành công, trả về token và thông tin user
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                   example: Đăng nhập thành công
- *                 token:
- *                   type: string
- *                 user:
- *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                     username:
- *                       type: string
- *                     email:
- *                       type: string
- *                     full_name:
- *                       type: string
- *                     phone_number:
- *                       type: string
- *                     role:
- *                       type: string
- *                     is_active:
- *                       type: boolean
+ *         description: Đăng nhập thành công
  *       400:
- *         description: Sai tài khoản hoặc mật khẩu
+ *         description: Sai thông tin đăng nhập
+ *       403:
+ *         description: Tài khoản bị khóa
  *       500:
  *         description: Lỗi server
  */
-
 router.post("/login", async (req, res) => {
   const { identifier, password } = req.body;
 
-  // Validate dữ liệu đầu vào
   if (!identifier || !password) {
     return res.status(400).json({ error: "Thiếu identifier hoặc password" });
   }
 
+  let conn;
   try {
-    const pool = await poolPromise;
-    const result = await pool
-      .request()
-      .input("identifier", sql.VarChar(100), identifier).query(`
-        SELECT * FROM users 
-        WHERE email = @identifier OR username = @identifier
-      `);
+    conn = await pool.getConnection();
+    const [users] = await conn.execute(
+      "SELECT * FROM users WHERE email = ? OR username = ?",
+      [identifier, identifier]
+    );
 
-    if (result.recordset.length === 0) {
-      // Trả lỗi chung tránh lộ thông tin
-      return res
-        .status(400)
-        .json({ error: "Tài khoản hoặc mật khẩu không đúng" });
+    if (users.length === 0) {
+      return res.status(400).json({ error: "Tài khoản không tồn tại" });
     }
 
-    const user = result.recordset[0];
-    const validPassword = await bcrypt.compare(password, user.password_hash);
+    const user = users[0];
 
-    if (!validPassword) {
-      return res
-        .status(400)
-        .json({ error: "Tài khoản hoặc mật khẩu không đúng" });
+    if (!user.is_active) {
+      return res.status(403).json({ error: "Tài khoản đã bị khóa" });
+    }
+
+    const passwordMatch = await bcrypt.compare(password, user.password_hash);
+    if (!passwordMatch) {
+      return res.status(400).json({ error: "Mật khẩu không đúng" });
     }
 
     const token = jwt.sign(
@@ -191,107 +230,54 @@ router.post("/login", async (req, res) => {
         is_active: user.is_active,
       },
     });
-  } catch (err) {
-    console.error(err);
+  } catch (error) {
+    console.error("Error in /login:", error.stack || error);
     res.status(500).json({ error: "Lỗi server" });
+  } finally {
+    if (conn) conn.release();
   }
 });
 
 /**
  * @swagger
- * /auth/register:
- *   post:
- *     summary: Đăng ký người dùng mới
- *     tags:
- *       - Auth
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - username
- *               - email
- *               - password
- *             properties:
- *               username:
- *                 type: string
- *                 example: newuser
- *               email:
- *                 type: string
- *                 example: newuser@example.com
- *               password:
- *                 type: string
- *                 example: password123
- *               full_name:
- *                 type: string
- *                 example: Nguyễn Văn A
- *               phone_number:
- *                 type: string
- *                 example: 0123456789
+ * /auth/users:
+ *   get:
+ *     summary: Lấy danh sách người dùng (Admin)
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - name: search
+ *         in: query
+ *         schema:
+ *           type: string
+ *         description: Tìm theo username hoặc full_name
  *     responses:
- *       201:
- *         description: Đăng ký thành công
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message:
- *                   type: string
- *                   example: Đăng ký thành công
- *       400:
- *         description: Username hoặc email đã tồn tại hoặc dữ liệu không hợp lệ
+ *       200:
+ *         description: Danh sách người dùng
+ *       403:
+ *         description: Không có quyền
  *       500:
  *         description: Lỗi server
  */
+router.get("/users", authenticateToken, requireAdmin, async (req, res) => {
+  const search = req.query.search || "";
 
-router.post("/register", async (req, res) => {
-  const { username, email, password, full_name, phone_number } = req.body;
-
-  // Validate dữ liệu đầu vào
-  if (!username || !email || !password) {
-    return res
-      .status(400)
-      .json({ error: "Thiếu username, email hoặc password" });
-  }
-
+  let conn;
   try {
-    const pool = await poolPromise;
-
-    // Kiểm tra xem username hoặc email đã tồn tại chưa
-    const existingUser = await pool
-      .request()
-      .input("username", sql.VarChar(50), username)
-      .input("email", sql.VarChar(100), email).query(`
-        SELECT * FROM users 
-        WHERE username = @username OR email = @email
-      `);
-
-    if (existingUser.recordset.length > 0) {
-      return res.status(400).json({ error: "Username hoặc email đã tồn tại" });
-    }
-
-    // Hash mật khẩu
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Thêm user mới vào database
-    await pool
-      .request()
-      .input("username", sql.VarChar(50), username)
-      .input("email", sql.VarChar(100), email)
-      .input("password_hash", sql.VarChar(255), hashedPassword)
-      .input("full_name", sql.VarChar(100), full_name || null)
-      .input("phone_number", sql.VarChar(15), phone_number || null).query(`
-        INSERT INTO users (username, email, password_hash, full_name, phone_number)
-        VALUES (@username, @email, @password_hash, @full_name, @phone_number)
-      `);
-
-    res.status(201).json({ message: "Đăng ký thành công" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Lỗi server" });
+    conn = await pool.getConnection();
+    const [users] = await conn.execute(
+      `SELECT id, username, email, full_name, phone_number, role, is_active
+       FROM users
+       WHERE username LIKE ? OR full_name LIKE ?`,
+      [`%${search}%`, `%${search}%`]
+    );
+    res.json(users);
+  } catch (error) {
+    console.error("Error fetching users:", error.stack || error);
+    res.status(500).json({ error: "Lỗi server khi lấy người dùng" });
+  } finally {
+    if (conn) conn.release();
   }
 });
 

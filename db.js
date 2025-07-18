@@ -1,27 +1,23 @@
-const sql = require("mssql");
+const mysql = require("mysql2/promise");
 require("dotenv").config();
 
-const config = {
+const pool = mysql.createPool({
+  host: process.env.DB_HOST,
+  port: parseInt(process.env.DB_PORT, 10),
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-  server: process.env.DB_HOST,
-  port: parseInt(process.env.DB_PORT, 10), // <- THÊM DÒNG NÀY
   database: process.env.DB_NAME,
-  options: {
-    encrypt: false,
-    trustServerCertificate: true,
-  },
-};
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+});
 
-const poolPromise = new sql.ConnectionPool(config)
-  .connect()
-  .then((pool) => {
-    console.log("✅ Connected to MSSQL");
-    return pool;
-  })
-  .catch((err) => console.log("❌ Database Connection Failed!", err));
+pool
+  .getConnection()
+  .then(() => console.log("✅ Connected to MySQL pool"))
+  .catch((err) => {
+    console.error("❌ Database connection failed:", err);
+    process.exit(1);
+  });
 
-module.exports = {
-  sql,
-  poolPromise,
-};
+module.exports = { pool }; // ✅ Bọc trong object để dùng destructuring

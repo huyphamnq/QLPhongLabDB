@@ -11,24 +11,28 @@ const app = express();
 
 const allowedOrigins = [
   "https://qlphonglabdb.onrender.com",
-  "http://127.0.0.1:5500", // test local BE
-  "http://localhost:3000", // test local FE
+  "http://127.0.0.1:5500", // test local FE
+  "http://localhost:3000", // test local BE
 ];
 
 app.use(
   cors({
     origin: function (origin, callback) {
       if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        console.log("Blocked by CORS:", origin);
-        callback(new Error("Not allowed by CORS"));
+        return callback(null, true);
       }
+      callback(new Error("Not allowed by CORS"));
     },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
+// Middleware log request
+// app.use((req, res, next) => {
+//   console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+//   next();
+// });
 
 app.use(express.json());
 
@@ -41,7 +45,8 @@ const options = {
       description: "",
     },
     servers: [
-      { url: "https://qlphonglabdb.onrender.com" }, // domain public backend
+      { url: "http://localhost:3000" },
+      { url: "https://qlphonglabdb.onrender.com" },
     ],
     components: {
       securitySchemes: {
@@ -61,7 +66,9 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(specs));
 
 app.use("/auth", authRouter);
 
-app.listen(3000, "0.0.0.0", () => {
-  console.log(`Swagger UI Local Test: https://localhost:3000/api-docs`);
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Swagger UI Local Test: http://localhost:${PORT}/api-docs`);
   console.log(`Swagger UI Public: https://qlphonglabdb.onrender.com/api-docs`);
 });
